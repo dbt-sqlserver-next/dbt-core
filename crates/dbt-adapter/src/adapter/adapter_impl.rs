@@ -669,8 +669,11 @@ impl AdapterImpl {
         }
 
         let mut last_batch = None;
+        // Separate from `last_batch`: the last statement in the split batch
+        // whose result actually has columns.
+        let mut last_fetched_batch = None;
         for sql in statements {
-            last_batch = Some(execute_query_with_retry(
+            let batch = execute_query_with_retry(
                 engine.clone(),
                 state,
                 conn,
@@ -680,7 +683,11 @@ impl AdapterImpl {
                 &options,
                 fetch,
                 token.clone(),
-            )?);
+            )?;
+            if fetch && batch.num_columns() > 0 {
+                last_fetched_batch = Some(batch.clone());
+            }
+            last_batch = Some(batch);
         }
 
         let last_batch = last_batch.expect("last_batch should never be None");
@@ -689,6 +696,8 @@ impl AdapterImpl {
             last_batch.rows_affected(self.adapter_type()),
             last_batch.query_id(self.adapter_type()),
         );
+
+        let last_batch = last_fetched_batch.unwrap_or(last_batch);
 
         // Deduplicate column names to match dbt-core's behavior, which renames
         // duplicate columns to `col_2`, `col_3`, etc.
